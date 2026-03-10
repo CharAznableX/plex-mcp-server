@@ -2,8 +2,6 @@
 
 A powerful Model-Context-Protocol (MCP) server for interacting with Plex Media Server. This is an enhanced fork of the original [plex-mcp-server](https://github.com/vladimir-tutin/plex-mcp-server) by Vladimir Tutin.
 
-**Special thanks to Vladimir Tutin for creating the original project and providing a solid foundation for Plex MCP integration!**
-
 ## ✨ Added Features
 
 This fork includes the following enhancements:
@@ -209,8 +207,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- **Vladimir Tutin** - For creating the original [plex-mcp-server](https://github.com/vladimir-tutin/plex-mcp-server)
-- The Plex community for their support and feedback
+This project is a small fork of the original [plex-mcp-server](https://github.com/vladimir-tutin/plex-mcp-server) by Vladimir Tutin, used under the MIT License. The core design and implementation are his work; my changes are limited to subtle tweaks and personal preferences. All credit for the original idea and server belongs to Vladimir Tutin, and this fork exists out of respect and appreciation for his contribution to the MCP ecosystem.
 
 ## Changelog
 
