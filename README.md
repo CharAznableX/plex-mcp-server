@@ -1,41 +1,29 @@
 # Plex MCP Server (Enhanced Fork)
 
-A powerful Model-Context-Protocol (MCP) server for interacting with Plex Media Server. This is an enhanced fork of the original [plex-mcp-server](https://github.com/vladimir-tutin/plex-mcp-server) with significant improvements in client detection, device control, and security.
+A powerful Model-Context-Protocol (MCP) server for interacting with Plex Media Server. This is an enhanced fork of the original [plex-mcp-server](https://github.com/vladimir-tutin/plex-mcp-server) by Vladimir Tutin.
 
-## ✨ What Makes This Fork Different
+**Special thanks to Vladimir Tutin for creating the original project and providing a solid foundation for Plex MCP integration!**
 
-| Feature | Original Repo | This Fork |
-|---------|---------------|-----------|
-| Passive Client Detection | ❌ Only detects active streams | ✅ Detects all clients without active stream |
-| Wake-on-LAN | ❌ | ✅ Wake network devices via WOL |
-| ADB Wake for Android | ❌ | ✅ Wake Shield TV, Android TV via ADB |
-| Client Caching | ❌ | ✅ 5-minute TTL caching |
-| Multiple Discovery Methods | ❌ | ✅ myPlex + server + sessions |
-| App Launch via ADB | ❌ | ✅ Launch apps on Android devices |
-| **Security Module** | ❌ | ✅ Comprehensive security features |
-| Input Validation | ❌ | ✅ Sanitization and validation |
-| Rate Limiting | ❌ | ✅ 100 requests per 60 seconds |
-| Audit Logging | ❌ | ✅ Security audit trail |
-| Secure Error Handling | ❌ | ✅ No sensitive data leakage |
+## ✨ Added Features
 
-## 🚀 Key Improvements
+This fork includes the following enhancements:
 
-### 1. Passive Client Detection
-- **Problem**: Original only detected clients with active streams
-- **Solution**: Multiple discovery methods work without active streams
-- **Methods**: myPlexAccount.resources(), plex.clients(), session-based detection
+### Client Detection Improvements
+- **Passive Client Detection**: Clients can now be detected without requiring an active stream
+- **Multiple Discovery Methods**: Uses myPlexAccount.resources(), plex.clients(), and session-based detection
+- **Client Caching**: 5-minute TTL caching for improved performance
 
-### 2. Wake Module
-- **ADB Wake**: Wake Android TV / Shield TV via ADB
+### Wake Module (NEW)
+- **ADB Wake**: Wake Android TV / Shield TV via ADB (Android Debug Bridge)
 - **Wake-on-LAN**: Wake network devices via magic packet
 - **Client Storage**: Store IP/MAC addresses for clients
 - **App Launch**: Launch apps on Android devices
 
-### 3. Security Module
+### Security Module (NEW)
 - **Input Validation**: Sanitize all inputs to prevent injection attacks
 - **Rate Limiting**: Prevent API abuse (100 requests per 60 seconds)
 - **Audit Logging**: Track all operations for security review
-- **Secure Errors**: Never expose sensitive data in error messages
+- **Secure Error Handling**: Never expose sensitive data in error messages
 
 ## Installation
 
@@ -221,8 +209,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- Original project by [Vladimir Tutin](https://github.com/vladimir-tutin/plex-mcp-server)
-- Enhanced with passive client detection, wake functionality, and security features
+- **Vladimir Tutin** - For creating the original [plex-mcp-server](https://github.com/vladimir-tutin/plex-mcp-server)
+- The Plex community for their support and feedback
 
 ## Changelog
 
