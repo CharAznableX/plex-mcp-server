@@ -6,10 +6,40 @@ import json
 import time
 import asyncio
 from typing import List, Dict, Optional, Union, Any, Tuple
+from datetime import datetime, timedelta
 
 from modules import mcp, connect_to_plex
 from plexapi.exceptions import NotFound, Unauthorized
 from plexapi.client import PlexClient
+
+
+
+# Client cache for passive detection (reduces API calls)
+_client_cache: Dict[str, Dict[str, Any]] = {}
+_cache_timestamp: Optional[datetime] = None
+CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached_clients() -> Optional[List[Dict[str, Any]]]:
+    """Get cached client list if still valid."""
+    global _client_cache, _cache_timestamp
+    if _cache_timestamp and (datetime.now() - _cache_timestamp).total_seconds() < CACHE_TTL:
+        return list(_client_cache.values())
+    return None
+
+
+def _cache_clients(clients: List[Dict[str, Any]]):
+    """Cache client list."""
+    global _client_cache, _cache_timestamp
+    _client_cache = {c["machineIdentifier"]: c for c in clients}
+    _cache_timestamp = datetime.now()
+
+
+def _clear_client_cache():
+    """Clear client cache."""
+    global _client_cache, _cache_timestamp
+    _client_cache = {}
+    _cache_timestamp = None
 
 
 def _find_client(plex, client_identifier: str) -> Tuple[Optional[Any], Optional[Any], str]:
@@ -103,77 +133,113 @@ def _find_client(plex, client_identifier: str) -> Tuple[Optional[Any], Optional[
     return None, session, None
 
 @mcp.tool()
-async def client_list(include_details: bool = True, active_only: bool = False) -> str:
-    """List all available Plex clients including idle players.
-    
-    Uses myPlexAccount.resources() to discover all players (both active and idle),
-    not just those with active sessions.
-    
+async def client_list(include_details: bool = True, active_only: bool = False, force_refresh: bool = False) -> str:
+    """List all available Plex clients including idle/offline players.
+
+    IMPROVED: Uses multiple discovery methods for better passive detection:
+    1. myPlexAccount.resources() - Discovers all registered players
+    2. Server clients - Direct server client list
+    3. Session-based detection - Active sessions
+
+    Works WITHOUT requiring an active stream.
+
     Args:
         include_details: Whether to include detailed information about each client
         active_only: If True, only return clients that are currently playing or paused
-    
+        force_refresh: Force refresh cache and fetch fresh data from Plex
+
     Returns:
         List of clients with user info. Use machineIdentifier for reliable client control.
     """
     try:
+        # Check cache first (unless force_refresh)
+        if not force_refresh:
+            cached = _get_cached_clients()
+            if cached:
+                if active_only:
+                    cached = [c for c in cached if c.get("active", False)]
+                if include_details:
+                    return json.dumps({
+                        "status": "success",
+                        "message": f"Found {len(cached)} clients (from cache)",
+                        "clients_count": len(cached),
+                        "clients": cached,
+                        "cached": True
+                    })
+                else:
+                    return json.dumps({
+                        "status": "success",
+                        "message": f"Found {len(cached)} clients (from cache)",
+                        "clients_count": len(cached),
+                        "clients": [{"machineIdentifier": c["machineIdentifier"], "name": c["name"], "online": c["online"], "active": c["active"]} for c in cached],
+                        "cached": True
+                    })
+
         plex = connect_to_plex()
-        
-        # Get sessions for active playback info
+
+        # Method 1: Get sessions for active playback info
         sessions = plex.sessions()
         session_info = {}
         for session in sessions:
-            if hasattr(session, 'player') and session.player:
+            if hasattr(session, "player") and session.player:
                 player = session.player
-                machine_id = getattr(player, 'machineIdentifier', None)
+                machine_id = getattr(player, "machineIdentifier", None)
                 if machine_id:
                     username = "Unknown"
-                    if hasattr(session, 'usernames') and session.usernames:
+                    if hasattr(session, "usernames") and session.usernames:
                         username = session.usernames[0]
-                    
+
                     session_info[machine_id] = {
                         "user": username,
-                        "media_title": getattr(session, 'title', 'Unknown'),
-                        "media_type": getattr(session, 'type', 'unknown'),
-                        "state": getattr(player, 'state', 'unknown'),
-                        "address": getattr(player, 'address', None)
+                        "media_title": getattr(session, "title", "Unknown"),
+                        "media_type": getattr(session, "type", "unknown"),
+                        "state": getattr(player, "state", "unknown"),
+                        "address": getattr(player, "address", None)
                     }
-        
-        # Use myPlexAccount.resources() to find all available players
-        account = plex.myPlexAccount()
-        resources = account.resources()
-        
-        result = []
-        for resource in resources:
-            provides = getattr(resource, 'provides', '') or ''
-            # Only include resources that provide player capability
-            if 'player' not in provides.lower():
-                continue
-            
-            machine_id = getattr(resource, 'clientIdentifier', '')
-            resource_name = getattr(resource, 'name', 'Unknown')
-            presence = getattr(resource, 'presence', False)
-            platform = getattr(resource, 'platform', 'Unknown')
-            product = getattr(resource, 'product', 'Unknown')
-            
-            # Get local connection URI
-            local_uri = None
-            if hasattr(resource, 'connections') and resource.connections:
-                for conn in resource.connections:
-                    if getattr(conn, 'local', False):
-                        local_uri = getattr(conn, 'uri', None)
-                        break
-            
-            # Check if this client has an active session
-            info = session_info.get(machine_id, {})
-            state = info.get("state", "idle" if presence else "offline")
-            is_active = state in ("playing", "paused")
-            
-            # Skip non-active clients if active_only is requested
-            if active_only and not is_active:
-                continue
-            
-            if include_details:
+
+        # Method 2: Use myPlexAccount.resources() to find ALL players (passive detection)
+        # This works WITHOUT an active stream
+        all_clients = {}
+
+        try:
+            account = plex.myPlexAccount()
+            resources = account.resources()
+
+            for resource in resources:
+                provides = getattr(resource, "provides", "") or ""
+                # Only include resources that provide player capability
+                if "player" not in provides.lower():
+                    continue
+
+                machine_id = getattr(resource, "clientIdentifier", "")
+                resource_name = getattr(resource, "name", "Unknown")
+                presence = getattr(resource, "presence", False)
+                platform = getattr(resource, "platform", "Unknown")
+                product = getattr(resource, "product", "Unknown")
+                last_seen = getattr(resource, "lastSeenAt", None)
+
+                # Get local connection URI
+                local_uri = None
+                public_uri = None
+                if hasattr(resource, "connections") and resource.connections:
+                    for conn in resource.connections:
+                        if getattr(conn, "local", False):
+                            local_uri = getattr(conn, "uri", None)
+                        else:
+                            public_uri = getattr(conn, "uri", None)
+
+                # Check if this client has an active session
+                info = session_info.get(machine_id, {})
+                state = info.get("state", "idle" if presence else "offline")
+                is_active = state in ("playing", "paused")
+
+                # Determine controllability
+                controllable = False
+                if local_uri and presence:
+                    controllable = True
+                elif info.get("address") and is_active:
+                    controllable = True
+
                 client_data = {
                     "machineIdentifier": machine_id,
                     "name": resource_name,
@@ -185,42 +251,98 @@ async def client_list(include_details: bool = True, active_only: bool = False) -
                     "platform": platform,
                     "product": product,
                     "provides": provides,
-                    "address": local_uri or info.get("address"),
-                    "controllable": local_uri is not None and presence
+                    "address": local_uri or public_uri or info.get("address"),
+                    "local_uri": local_uri,
+                    "public_uri": public_uri,
+                    "controllable": controllable,
+                    "last_seen": str(last_seen) if last_seen else None
                 }
-                result.append(client_data)
-            else:
-                result.append({
-                    "machineIdentifier": machine_id, 
-                    "name": resource_name,
-                    "online": presence,
-                    "active": is_active
-                })
-        
+
+                all_clients[machine_id] = client_data
+
+        except Exception as e:
+            # If myPlexAccount fails, continue with other methods
+            pass
+
+        # Method 3: Server clients (fallback for local clients)
+        try:
+            server_clients = plex.clients()
+            for client in server_clients:
+                machine_id = getattr(client, "machineIdentifier", None)
+                if machine_id and machine_id not in all_clients:
+                    client_data = {
+                        "machineIdentifier": machine_id,
+                        "name": getattr(client, "title", "Unknown"),
+                        "online": True,
+                        "active": False,
+                        "user": None,
+                        "state": "idle",
+                        "nowPlaying": None,
+                        "platform": getattr(client, "platform", "Unknown"),
+                        "product": getattr(client, "product", "Unknown"),
+                        "provides": getattr(client, "provides", ""),
+                        "address": getattr(client, "address", None),
+                        "local_uri": None,
+                        "public_uri": None,
+                        "controllable": True,
+                        "last_seen": None
+                    }
+                    all_clients[machine_id] = client_data
+        except Exception:
+            pass
+
+        # Convert to list
+        result = list(all_clients.values())
+
+        # Filter by active_only if requested
+        if active_only:
+            result = [c for c in result if c.get("active", False)]
+
+        # Cache the results
+        _cache_clients(result)
+
         if not result:
             return json.dumps({
                 "status": "success",
-                "message": "No player clients found in your Plex account.",
-                "count": 0,
-                "clients": []
+                "message": "No clients found. Make sure your Plex server is connected to your Plex account and clients are registered.",
+                "clients_count": 0,
+                "clients": [],
+                "cached": False,
+                "troubleshooting": [
+                    "Ensure Plex server is connected to your Plex account",
+                    "Check that clients (Shield TV, Plexamp, etc.) are logged into the same account",
+                    "Verify network connectivity between server and clients",
+                    "Try refreshing the Plex server in Settings > Server > Refresh"
+                ]
             })
-        
-        # Sort: online first, then by name
-        result.sort(key=lambda x: (not x.get("online", False), x.get("name", "").lower()))
-            
-        return json.dumps({
-            "status": "success",
-            "message": f"Found {len(result)} player clients",
-            "count": len(result),
-            "note": "Use machineIdentifier or name for client control. Only 'online' clients with an address are controllable.",
-            "clients": result
-        }, indent=2)
-            
+
+        # Return appropriate detail level
+        if include_details:
+            return json.dumps({
+                "status": "success",
+                "message": f"Found {len(result)} clients",
+                "clients_count": len(result),
+                "clients": result,
+                "cached": False
+            })
+        else:
+            return json.dumps({
+                "status": "success",
+                "message": f"Found {len(result)} clients",
+                "clients_count": len(result),
+                "clients": [{"machineIdentifier": c["machineIdentifier"], "name": c["name"], "online": c["online"], "active": c["active"]} for c in result],
+                "cached": False
+            })
+
     except Exception as e:
         return json.dumps({
             "status": "error",
-            "message": f"Error listing clients: {str(e)}"
+            "message": f"Failed to list clients: {str(e)}",
+            "clients_count": 0,
+            "clients": [],
+            "error_type": type(e).__name__
         })
+
 
 @mcp.tool()
 async def client_get_details(client_name: str) -> str:
