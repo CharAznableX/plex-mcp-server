@@ -678,7 +678,66 @@ async def client_start_playback(media_title: str = None, client_name: str = None
                 })
         
         # Try to find the client
-        client, session, client_found_name = _find_client(plex, client_name)
+                # Check if client is online, wake if offline
+        try:
+            # Get client info from cache or Plex
+            clients = await client_list(force_refresh=False)
+            clients_data = json.loads(clients)
+
+            # Find the target client
+            target_client = None
+            for c in clients_data.get('clients', []):
+                if c.get('name') == client_name or c.get('machineIdentifier') == client_name:
+                    target_client = c
+                    break
+
+            if target_client:
+                # Check if client is offline
+                if not target_client.get('presence', False):
+                    # Client is offline, try to wake via ADB
+                    print(f"Client {client_name} is offline, attempting to wake...")
+
+                    # Get IP address from client data
+                    client_ip = target_client.get('address', '')
+                    if client_ip:
+                        # Remove port if present
+                        if ':' in client_ip:
+                            client_ip = client_ip.split(':')[0]
+
+                        # Try to wake via ADB
+                        try:
+                            wake_result = await client_wake(client_name, method='adb')
+                            wake_data = json.loads(wake_result)
+
+                            if wake_data.get('success'):
+                                print(f"Wake command sent to {client_name}, waiting for client to come online...")
+                                # Wait for client to come online (up to 30 seconds)
+                                for _ in range(6):
+                                    await asyncio.sleep(5)
+                                    # Refresh client list
+                                    clients = await client_list(force_refresh=True)
+                                    clients_data = json.loads(clients)
+                                    for c in clients_data.get('clients', []):
+                                        if c.get('name') == client_name or c.get('machineIdentifier') == client_name:
+                                            if c.get('presence', False):
+                                                print(f"Client {client_name} is now online!")
+                                                # Re-find the client now that it's online
+                                                client, session, client_found_name = _find_client(plex, client_name)
+                                                break
+                                    else:
+                                        continue
+                                    break
+                            else:
+                                print(f"Failed to wake client: {wake_data.get('message', 'Unknown error')}")
+                        except Exception as e:
+                            print(f"Error waking client: {str(e)}")
+                    else:
+                        print(f"No IP address found for client {client_name}")
+        except Exception as e:
+            print(f"Error checking/waking client: {str(e)}")
+
+        # Try to find the client
+client, session, client_found_name = _find_client(plex, client_name)
         
         if client is None:
             if session is not None:
