@@ -19,7 +19,6 @@ This fork includes the following enhancements:
 
 ### Security Module (NEW)
 - **Input Validation**: Sanitize all inputs to prevent injection attacks
-- **Rate Limiting**: Prevent API abuse (100 requests per 60 seconds)
 - **Audit Logging**: Track all operations for security review
 - **Secure Error Handling**: Never expose sensitive data in error messages
 
@@ -124,8 +123,6 @@ Tools for security management.
 |---------|-------------|------------|
 | `security_get_status` | Get security configuration and status. | None |
 | `security_get_audit_log` | Get security audit log entries. | `limit` (optional), `client_id` (optional) |
-| `security_get_rate_limits` | Get current rate limit status. | None |
-| `security_clear_rate_limits` | Clear rate limits for a client. | `client_id` (optional) |
 | `security_validate_input` | Validate and sanitize input. | `value`, `input_type` |
 
 ## ADB Setup for Android Wake
@@ -166,11 +163,6 @@ All inputs are validated and sanitized to prevent:
 - Script injection
 - Command injection
 - Path traversal
-
-### Rate Limiting
-- 100 requests per 60 seconds per client
-- Automatic reset after window expires
-- Configurable limits
 
 ### Audit Logging
 - All operations logged with timestamp
@@ -214,7 +206,7 @@ This project is a small fork of the original [plex-mcp-server](https://github.co
 ### v1.1.0 (Enhanced Fork)
 - Added passive client detection (works without active stream)
 - Added Wake module with ADB and Wake-on-LAN support
-- Added Security module with input validation, rate limiting, and audit logging
+- Added Security module with input validation and audit logging
 - Added client caching (5-minute TTL)
 - Added multiple discovery methods
 - Added app launch functionality for Android devices
