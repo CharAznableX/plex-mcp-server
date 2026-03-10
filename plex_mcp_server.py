@@ -29,6 +29,13 @@ env_loaded = init_environment()
 # Import the main mcp instance from modules
 import modules
 from modules import mcp, connect_to_plex
+from modules.wake import (
+    client_wake,
+    client_sleep,
+    client_store_address,
+    client_get_stored_addresses,
+    client_launch_app
+)
 from modules.auth import (
     oauth_config,
     validate_token,

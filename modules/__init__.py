@@ -62,3 +62,13 @@ def connect_to_plex() -> PlexServer:
     
     # We shouldn't get here but just in case
     raise ValueError("Failed to connect to Plex server")
+
+
+# Wake module imports
+from modules.wake import (
+    client_wake,
+    client_sleep,
+    client_store_address,
+    client_get_stored_addresses,
+    client_launch_app
+)
