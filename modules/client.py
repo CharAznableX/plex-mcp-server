@@ -9,7 +9,8 @@ from typing import List, Dict, Optional, Union, Any, Tuple
 
 from modules import mcp, connect_to_plex
 from plexapi.exceptions import NotFound, Unauthorized
-from modules.wake import client_wake
+from modules.connectivity import check_client_connectivity
+
 from plexapi.client import PlexClient
 
 
@@ -425,77 +426,6 @@ async def client_get_timelines(client_name: str) -> str:
         })
 
 @mcp.tool()
-
-
-async def _wake_client_if_offline(client_name: str) -> bool:
-    """Check if client is offline and wake it via ADB if needed.
-
-    Returns True if client is online or was successfully woken, False otherwise.
-    """
-    try:
-        # Get client info from cache or Plex
-        clients_result = await client_list(force_refresh=False)
-        clients_data = json.loads(clients_result)
-
-        # Find the target client
-        target_client = None
-        for c in clients_data.get('clients', []):
-            if c.get('name') == client_name or c.get('machineIdentifier') == client_name:
-                target_client = c
-                break
-
-        if not target_client:
-            print(f"Client {client_name} not found in client list")
-            return False
-
-        # Check if client is online
-        if target_client.get('presence', False):
-            print(f"Client {client_name} is already online")
-            return True
-
-        # Client is offline, try to wake via ADB
-        print(f"Client {client_name} is offline, attempting to wake...")
-
-        # Get IP address from client data
-        client_ip = target_client.get('address', '')
-        if not client_ip:
-            print(f"No IP address found for client {client_name}")
-            return False
-
-        # Remove port if present
-        if ':' in client_ip:
-            client_ip = client_ip.split(':')[0]
-
-        # Try to wake via ADB
-        try:
-            wake_result = await client_wake(client_name, method='adb')
-            wake_data = json.loads(wake_result)
-
-            if wake_data.get('success'):
-                print(f"Wake command sent to {client_name}, waiting for client to come online...")
-                # Wait for client to come online (up to 30 seconds)
-                for _ in range(6):
-                    await asyncio.sleep(5)
-                    # Refresh client list
-                    clients_result = await client_list(force_refresh=True)
-                    clients_data = json.loads(clients_result)
-                    for c in clients_data.get('clients', []):
-                        if c.get('name') == client_name or c.get('machineIdentifier') == client_name:
-                            if c.get('presence', False):
-                                print(f"Client {client_name} is now online!")
-                                return True
-                print(f"Client {client_name} did not come online within 30 seconds")
-                return False
-            else:
-                print(f"Failed to wake client: {wake_data.get('message', 'Unknown error')}")
-                return False
-        except Exception as e:
-            print(f"Error waking client: {str(e)}")
-            return False
-    except Exception as e:
-        print(f"Error checking/waking client: {str(e)}")
-        return False
-
 async def client_start_playback(media_title: str = None, client_name: str = None, 
                         offset: int = 0, library_name: str = None, 
                         use_external_player: bool = False,
@@ -627,10 +557,7 @@ async def client_start_playback(media_title: str = None, client_name: str = None
                     "message": f"Error discovering clients: {str(e)}"
                 })
         
-        # Try to find the client        # Check if client is online, wake if offline
-        await _wake_client_if_offline(client_name)
-        
-
+        # Try to find the client
         client, session, client_found_name = _find_client(plex, client_name)
         
         if client is None:
@@ -975,6 +902,87 @@ async def client_navigate(client_name: str, action: str) -> str:
             "status": "error",
             "message": f"Error setting up client navigation: {str(e)}"
         })
+
+
+@mcp.tool()
+async def client_check_connectivity(client_name: str) -> str:
+    """Check if a Plex client is actually reachable via real-time connectivity test.
+
+    This tool performs a real-time TCP connection check to verify if the client
+    is actually online, unlike client_list which returns cached Plex status.
+
+    Args:
+        client_name: Name or machineIdentifier of the client to check
+
+    Returns:
+        Connectivity status with real-time check results
+    """
+    try:
+        plex = connect_to_plex()
+
+        # Get client info from Plex
+        account = plex.myPlexAccount()
+        resources = account.resources()
+
+        target_client = None
+        for resource in resources:
+            provides = getattr(resource, 'provides', '') or ''
+            if 'player' not in provides.lower():
+                continue
+
+            machine_id = getattr(resource, 'clientIdentifier', '')
+            resource_name = getattr(resource, 'name', 'Unknown')
+
+            if client_name.lower() in resource_name.lower() or client_name == machine_id:
+                target_client = resource
+                break
+
+        if not target_client:
+            return json.dumps({
+                "status": "error",
+                "message": f"Client '{client_name}' not found"
+            })
+
+        # Get client IP
+        local_uri = None
+        if hasattr(target_client, 'connections') and target_client.connections:
+            for conn in target_client.connections:
+                if getattr(conn, 'local', False):
+                    local_uri = getattr(conn, 'uri', None)
+                    break
+
+        if not local_uri:
+            return json.dumps({
+                "status": "error",
+                "message": f"Client '{client_name}' has no local connection URI",
+                "client": getattr(target_client, 'name', 'Unknown'),
+                "plex_status": getattr(target_client, 'presence', False)
+            })
+
+        # Extract IP from URI
+        client_ip = local_uri
+        if ':' in client_ip:
+            client_ip = client_ip.split(':')[0]
+
+        # Perform real-time connectivity check
+        is_reachable = await check_client_connectivity(client_ip)
+
+        return json.dumps({
+            "status": "success",
+            "client": getattr(target_client, 'name', 'Unknown'),
+            "machine_id": getattr(target_client, 'clientIdentifier', ''),
+            "ip_address": client_ip,
+            "plex_cached_status": getattr(target_client, 'presence', False),
+            "real_time_connectivity": is_reachable,
+            "message": f"Client is {'reachable' if is_reachable else 'NOT reachable'} via real-time check"
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"Error checking connectivity: {str(e)}"
+        })
+
 
 @mcp.tool()
 async def client_set_streams(client_name: str, audio_stream_id: str = None, 
